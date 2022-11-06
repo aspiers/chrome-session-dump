@@ -70,6 +70,7 @@ type window struct {
 	id           uint32
 	deleted      bool
 	tabs         []*tab
+	tabGroups    map[string]*group
 	userTitle    string
 }
 
@@ -96,14 +97,18 @@ var groups = map[string]*group{}
 
 func getWindow(id uint32) *window {
 	if _, ok := windows[id]; !ok {
-		windows[id] = &window{id: id}
+		windows[id] = &window{id: id, tabGroups: map[string]*group{}}
 	}
 
 	return windows[id]
 }
 
+func getGroupKey(high uint64, low uint64) string {
+	return fmt.Sprintf("%x%x", high, low)
+}
+
 func getGroup(high uint64, low uint64) *group {
-	key := fmt.Sprintf("%x%x", high, low)
+	key := getGroupKey(high, low)
 	if _, ok := groups[key]; !ok {
 		groups[key] = &group{high, low, "", 0, false}
 	}
@@ -253,11 +258,19 @@ type Tab struct {
 	GroupCollapsed bool           `json:"groupCollapsed"`
 }
 
+type TabGroup struct {
+	Name      string       `json:"name"`
+	Color     uint32       `json:"color"`
+	Collapsed bool         `json:"collapsed"`
+}
+
 type Window struct {
-	Tabs      []*Tab `json:"tabs"`
-	Active    bool   `json:"active"`
-	Deleted   bool   `json:"deleted"`
-	UserTitle string `json:"userTitle"`
+	Tabs      []*Tab      `json:"tabs"`
+	TabGroups []*TabGroup `json:"tabGroups"`
+	Active    bool        `json:"active"`
+	Deleted   bool        `json:"deleted"`
+	Name      string      `json:"name"`
+	UserTitle string      `json:"userTitle"`
 }
 
 type HistoryItem struct {
@@ -440,9 +453,11 @@ func parse(path string) Result {
 			groupCollapsed := false
 			groupColor := uint32(0)
 			if t.group != nil {
+				groupKey := getGroupKey(t.group.high, t.group.low)
 				groupName = t.group.name
 				groupCollapsed = t.group.collapsed
 				groupColor = t.group.color
+				w.tabGroups[groupKey] = t.group
 			}
 
 			T := &Tab{
@@ -466,6 +481,16 @@ func parse(path string) Result {
 			if !t.deleted {
 				idx++
 			}
+		}
+
+		for _, tg := range w.tabGroups {
+			TG := &TabGroup{
+				Name: tg.name,
+				Color: tg.color,
+				Collapsed: tg.collapsed,
+			}
+
+			W.TabGroups = append(W.TabGroups, TG)
 		}
 
 		Windows = append(Windows, W)
