@@ -57,9 +57,12 @@ const (
 )
 
 type group struct {
-	high uint64
-	low  uint64
-	name string
+
+	high      uint64
+	low       uint64
+	name      string
+	color     uint32
+	collapsed bool
 }
 
 type window struct {
@@ -102,7 +105,7 @@ func getWindow(id uint32) *window {
 func getGroup(high uint64, low uint64) *group {
 	key := fmt.Sprintf("%x%x", high, low)
 	if _, ok := groups[key]; !ok {
-		groups[key] = &group{high, low, ""}
+		groups[key] = &group{high, low, "", 0, false}
 	}
 
 	return groups[key]
@@ -114,6 +117,21 @@ func getTab(id uint32) *tab {
 	}
 
 	return tabs[id]
+}
+
+func readBool(r io.Reader) bool {
+	var b [1]byte
+	if n, err := r.Read(b[:]); err != nil || n != 1 {
+		if err != nil {
+			panic(err)
+		}
+		if uint8(b[0]) > 1 {
+			panic(fmt.Errorf("Failed to read bool as 0 or 1."))
+		}
+		panic(fmt.Errorf("Failed to read int8."))
+	}
+
+	return uint8(b[0]) == 1
 }
 
 func readUint8(r io.Reader) uint8 {
@@ -225,12 +243,14 @@ type Result struct {
 }
 
 type Tab struct {
-	Active  bool           `json:"active"`
-	History []*HistoryItem `json:"history"`
-	Url     string         `json:"url"`
-	Title   string         `json:"title"`
-	Deleted bool           `json:"deleted"`
-	Group   string         `json:"group"`
+	Active         bool           `json:"active"`
+	History        []*HistoryItem `json:"history"`
+	Url            string         `json:"url"`
+	Title          string         `json:"title"`
+	Deleted        bool           `json:"deleted"`
+	Group          string         `json:"group"`
+	GroupColor     uint32         `json:"groupColor"`
+	GroupCollapsed bool           `json:"groupCollapsed"`
 }
 
 type Window struct {
@@ -337,9 +357,14 @@ func parse(path string) Result {
 
 			high := readUint64(data)
 			low := readUint64(data)
-
 			name := readString16(data)
-			getGroup(high, low).name = name
+			color := readUint32(data)
+			collapsed := readBool(data)
+
+			group := getGroup(high, low)
+			group.name = name
+			group.color = color
+			group.collapsed = collapsed
 		case kCommandSetTabGroup:
 			id := readUint32(data)
 			readUint32(data) //Struct padding
@@ -412,11 +437,21 @@ func parse(path string) Result {
 		idx := 0
 		for _, t := range w.tabs {
 			groupName := ""
+			groupCollapsed := false
+			groupColor := uint32(0)
 			if t.group != nil {
 				groupName = t.group.name
+				groupCollapsed = t.group.collapsed
+				groupColor = t.group.color
 			}
 
-			T := &Tab{Active: idx == int(w.activeTabIdx), Deleted: t.deleted, Group: groupName}
+			T := &Tab{
+				Active: idx == int(w.activeTabIdx),
+				Deleted: t.deleted,
+				Group: groupName,
+				GroupColor: groupColor,
+				GroupCollapsed: groupCollapsed,
+			}
 
 			for _, h := range t.history {
 				T.History = append(T.History, &HistoryItem{h.url, h.title})
